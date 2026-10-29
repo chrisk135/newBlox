@@ -1,6 +1,6 @@
 -- ==============================================================================
 -- Roll Anime Card Farm - Advanced Automation Dashboard & Conveyor Pack Scanner
--- Version: 4.1 (Safe Start: Auto-Buy AUS, Nur Mutationen kaufen, Gezielter Filter)
+-- Version: 4.1 (Modal List Selectors, Robust Spawner, Rank 神, Trait Roller, Tower)
 -- Self-contained, executable Lua script for loadstring or executor execution
 -- ==============================================================================
 
@@ -28,20 +28,58 @@ end
 
 local function activatePrompt(prompt)
     if not prompt or not prompt.Parent then return false end
-    if typeof(fireproximityprompt) == "function" then
-        pcall(fireproximityprompt, prompt)
-        return true
-    else
-        local oldHold = prompt.HoldDuration
+    local ok = false
+    local oldLos = prompt.RequiresLineOfSight
+    local oldDist = prompt.MaxActivationDistance
+    local oldHold = prompt.HoldDuration
+
+    pcall(function()
+        prompt.RequiresLineOfSight = false
+        prompt.MaxActivationDistance = 999999
         prompt.HoldDuration = 0
+    end)
+
+    if typeof(fireproximityprompt) == "function" then
+        ok = pcall(fireproximityprompt, prompt, 1) or pcall(fireproximityprompt, prompt)
+    end
+    if not ok then
         pcall(function()
             prompt:InputHoldBegin()
             task.wait(0.05)
             prompt:InputHoldEnd()
+            ok = true
         end)
-        prompt.HoldDuration = oldHold
-        return true
     end
+
+    pcall(function()
+        prompt.HoldDuration = oldHold
+        prompt.MaxActivationDistance = oldDist
+        prompt.RequiresLineOfSight = oldLos
+    end)
+
+    return ok
+end
+
+local function activateClickDetector(cd)
+    if not cd or not cd.Parent then return false end
+    local ok = false
+    local oldDist = cd.MaxActivationDistance
+    pcall(function() cd.MaxActivationDistance = 999999 end)
+
+    if typeof(fireclickdetector) == "function" then
+        ok = pcall(fireclickdetector, cd, 1) or pcall(fireclickdetector, cd)
+    end
+    if not ok then
+        pcall(function()
+            if cd.MouseClick then
+                cd.MouseClick:Fire(player)
+                ok = true
+            end
+        end)
+    end
+
+    pcall(function() cd.MaxActivationDistance = oldDist end)
+    return ok
 end
 
 local function touchPart(part)
@@ -68,21 +106,33 @@ end
 
 local function clickButton(btn)
     if not btn or not btn.Parent then return false end
+    local ok = false
+    if typeof(firesignal) == "function" then
+        if btn:IsA("GuiButton") then
+            pcall(firesignal, btn.MouseButton1Click)
+            pcall(firesignal, btn.Activated)
+            pcall(firesignal, btn.MouseButton1Down)
+            pcall(firesignal, btn.MouseButton1Up)
+            ok = true
+        end
+    end
     if typeof(getconnections) == "function" then
         pcall(function()
             if btn.MouseButton1Click then
                 for _, conn in ipairs(getconnections(btn.MouseButton1Click)) do
                     if conn.Fire then conn:Fire() elseif conn.fire then conn:fire() end
+                    ok = true
                 end
             end
             if btn.Activated then
                 for _, conn in ipairs(getconnections(btn.Activated)) do
                     if conn.Fire then conn:Fire() elseif conn.fire then conn:fire() end
+                    ok = true
                 end
             end
         end)
     end
-    return true
+    return ok
 end
 
 local function findGameRemote(remoteNames)
@@ -111,58 +161,91 @@ local function getPlayerBase()
 end
 
 -- ------------------------------------------------------------------------------
--- 2. KONFIGURATION & ZUSTAND (STANDARDMÄSSIG ALLES AUS!)
+-- 2. KONFIGURATION & ZUSTAND (SETTINGS & STATS)
 -- ------------------------------------------------------------------------------
 local SETTINGS = {
     Language = "DE", -- "DE", "EN"
 
-    -- Förderband & Pack-Kauf (Sicherer Start!)
-    AutoSpawnEnabled = false,       -- Standardmäßig AUS (spawnt erst bei Klick auf AN)
-    ConveyorAutoBuyEnabled = false, -- Standardmäßig AUS (kauft erst bei Klick auf AN)
-    RequireMutationOnly = true,     -- Kauft NUR Packs MIT Mutation (normale Standard-Packs werden ignoriert!)
-    SelectedPackFilter = "All",     -- "All" oder Wunsch-Pack
-    SelectedMutationFilter = "Nur mit Mutation (Any Mutation)", -- Keine normalen Packs ohne Mutation!
+    -- Conveyor & Pack Management (Sichere Defaults!)
+    AutoSpawnEnabled = false,       -- Standardmäßig AUS (startet sicher, spawnt nicht ungefragt)
+    ConveyorAutoBuyEnabled = false, -- Standardmäßig AUS (kauft NICHT sofort alles!)
+    RequireMutationOnly = true,     -- Kauft NUR Packs MIT Mutation (normale Packs werden ignoriert!)
+    SelectedPackFilter = "All",     -- "All" oder Pack-Name
+    SelectedMutationFilter = "Nur mit Mutation (Any Mutation)", -- Nur Packs mit Mutation!
     SpawnInterval = 2.0,            -- Sekunden zwischen Spawns
     ConveyorScanInterval = 0.5,     -- Scan-Frequenz des Förderbands
 
-    -- Rank-Maschine (Screenshots 1 & 4)
+    -- Rank Machine Settings (Screenshot 1 & 4)
     AutoRankRollEnabled = false,
     TargetRank = "神",              -- F, E, D, C, B, A, S, SS, SR, UR, LR, 神
     RankUseCash = true,
     RankUseGems = false,
     RankUseGemsFirst = false,
 
-    -- Trait-Roller (Screenshots 2 & 3)
+    -- Trait Roller Settings (Screenshot 2 & 3)
     AutoTraitRollEnabled = false,
-    TargetTrait = "Almighty",       -- Any, Almighty, Sovereign, Godlike, Overlord, etc.
+    TargetTrait = "Almighty",       -- Any, Almighty, Sovereign, Godlike, Overlord, Berserk, Monarch, Solar, Cosmic
 
-    -- Tower-Replay (Screenshot 5)
+    -- Tower Replay Settings (Screenshot 5)
     AutoTowerEnabled = false,
     TowerStopOnDefeat = true,
 
-    -- Basis & Farm
+    -- Base & Farm
     AutoCollectEnabled = true,
 
-    -- Utility & Sicherheit
+    -- Utility & Safety
     AntiAFKEnabled = true,
     FPSEnabled = true,
     SafeMode = true,
     GuiVisible = true,
     IsMinimised = false,
 
+    -- Dynamisch erweiterbare Listen (aus Index-Buch & Förderband)
     AvailablePacks = {
-        "All", "Dawn Pack", "Starter Pack", "Shadow Pack", "Demon Pack",
-        "Pirate Pack", "Dragon Pack", "Titan Pack", "Slayer Pack", "Chakra Pack",
-        "Sorcerer Pack", "Hero Pack", "Legendary Pack", "Mythic Pack", "Event Pack",
-        "Halloween Pack", "Cosmic Pack", "Void Pack", "God Pack"
+        "All",
+        "Dawn Pack",
+        "Starter Pack",
+        "Shadow Pack",
+        "Demon Pack",
+        "Pirate Pack",
+        "Dragon Pack",
+        "Titan Pack",
+        "Slayer Pack",
+        "Chakra Pack",
+        "Sorcerer Pack",
+        "Hero Pack",
+        "Legendary Pack",
+        "Mythic Pack",
+        "Event Pack",
+        "Halloween Pack",
+        "Cosmic Pack",
+        "Void Pack",
+        "God Pack"
     },
 
     AvailableMutations = {
         "Nur mit Mutation (Any Mutation)",
-        "Venomous", "Golden", "Diamond", "Rainbow", "Sakura", "Candy",
-        "Blessed", "Radioactive", "Glitch", "Starfallen", "Admin",
-        "Corrupt", "Void", "Shiny", "Electric", "Dark", "Frost",
-        "Inferno", "Divine", "Normal (Keine)", "Any"
+        "Venomous",
+        "Golden",
+        "Diamond",
+        "Rainbow",
+        "Sakura",
+        "Candy",
+        "Blessed",
+        "Radioactive",
+        "Glitch",
+        "Starfallen",
+        "Admin",
+        "Corrupt",
+        "Void",
+        "Shiny",
+        "Electric",
+        "Dark",
+        "Frost",
+        "Inferno",
+        "Divine",
+        "Normal (Keine)",
+        "Any"
     }
 }
 
@@ -184,7 +267,7 @@ local STATS = {
 }
 
 -- ------------------------------------------------------------------------------
--- 3. MEHRSPRACHIGKEIT (LOCALIZATION)
+-- 3. MEHRSPRACHIGKEIT (LOCALIZATION: DE & EN)
 -- ------------------------------------------------------------------------------
 local LANGUAGES = {
     DE = {
@@ -197,7 +280,7 @@ local LANGUAGES = {
         BaseTab = "Basis & Farm",
         SettingsTab = "Optionen",
 
-        DashboardStatus = "🚀 System bereit (Kauf ist standardmäßig AUS)",
+        DashboardStatus = "🚀 Automatisierungssystem aktiv",
         Session = "Sitzungszeit: ",
         Currency = "Yen: %s | Gems: %s",
         PacksSpawnedLabel = "Packs gespawnt: ",
@@ -252,11 +335,20 @@ local LANGUAGES = {
         SafeModeOff = "Safe-Mode (Anti-Ban Drosselung): [ AUS ]",
         KeybindHint = "💡 Drücke [Rechts-Strg] oder [Einfg] zum Ein-/Ausblenden",
 
-        MiniPillFormat = "🃏 Anime Farm | 📦 %d | 🛒 %d",
+        MiniPillFormat = "🃏 Anime Farm | 📦 %d gespawnt | 🛒 %d gekauft",
         ToastIndexScanned = "📖 Index gescannt: %d Packs & %d Mutationen geladen!",
         ToastPackBought = "🛒 Gekauft: %s!",
-        ToastPackSpawned = "📦 Pack gespawnt!",
-        ToastAllStopped = "🛑 Alle Automatisierungen gestoppt"
+        ToastPackSpawned = "📦 Pack auf Förderband gespawnt!",
+        ToastAllStopped = "🛑 Alle Automatisierungen gestoppt",
+
+        OpenListHint = "  ▾ (Liste öffnen)",
+        ModalTitlePack = "📦 Pack auswählen",
+        ModalTitleMutation = "✨ Mutation auswählen",
+        ModalTitleRank = "🎯 Ziel-Rang auswählen",
+        ModalTitleTrait = "🧬 Ziel-Trait auswählen",
+        SearchPlaceholder = "🔍 Suchen... (Tippen zum Filtern)",
+        SelectedBadge = "Aktiv",
+        ModalClose = "✕ Schließen"
     },
     EN = {
         AppTitle = "Roll Anime Card Farm — Pro",
@@ -268,7 +360,7 @@ local LANGUAGES = {
         BaseTab = "Base & Farm",
         SettingsTab = "Settings",
 
-        DashboardStatus = "🚀 System Ready (Auto-Buy is OFF by default)",
+        DashboardStatus = "🚀 Automation System Active",
         Session = "Session: ",
         Currency = "Yen: %s | Gems: %s",
         PacksSpawnedLabel = "Packs Spawned: ",
@@ -323,27 +415,37 @@ local LANGUAGES = {
         SafeModeOff = "Safe-Mode (Anti-Ban Throttle): [ OFF ]",
         KeybindHint = "💡 Press [RightControl] or [Insert] to Toggle Menu",
 
-        MiniPillFormat = "🃏 Anime Farm | 📦 %d | 🛒 %d",
+        MiniPillFormat = "🃏 Anime Farm | 📦 %d spawned | 🛒 %d bought",
         ToastIndexScanned = "📖 Index scanned: %d packs & %d mutations loaded!",
         ToastPackBought = "🛒 Bought: %s!",
-        ToastPackSpawned = "📦 Pack spawned!",
-        ToastAllStopped = "🛑 All automation modules stopped"
+        ToastPackSpawned = "📦 Pack spawned on conveyor!",
+        ToastAllStopped = "🛑 All automation modules stopped",
+
+        OpenListHint = "  ▾ (Open List)",
+        ModalTitlePack = "📦 Select Pack",
+        ModalTitleMutation = "✨ Select Mutation",
+        ModalTitleRank = "🎯 Select Target Rank",
+        ModalTitleTrait = "🧬 Select Target Trait",
+        SearchPlaceholder = "🔍 Search... (Type to filter)",
+        SelectedBadge = "Active",
+        ModalClose = "✕ Close"
     }
 }
 
 local translatableElements = {}
-local function registerText(instance, textKey, formatter)
+
+local function registerText(guiInstance, textKey, customFormatter)
     table.insert(translatableElements, {
-        Instance = instance,
+        Instance = guiInstance,
         Key = textKey,
-        Formatter = formatter
+        Formatter = customFormatter
     })
     local langTable = LANGUAGES[SETTINGS.Language] or LANGUAGES.DE
     local rawText = langTable[textKey] or textKey
-    if formatter then
-        instance.Text = formatter(rawText)
+    if customFormatter then
+        guiInstance.Text = customFormatter(rawText)
     else
-        instance.Text = rawText
+        guiInstance.Text = rawText
     end
 end
 
@@ -428,6 +530,7 @@ local function scanIndexBook()
     local newPacks = 0
     local newMutations = 0
 
+    -- 1. Scan PlayerGui Index Book / Dex / Collections
     local playerGui = player:FindFirstChild("PlayerGui")
     if playerGui then
         for _, gui in ipairs(playerGui:GetChildren()) do
@@ -444,17 +547,8 @@ local function scanIndexBook()
                             local mutCandidate = text:match("^([%a%s]+)%s+Mutation")
                                 or text:match("^Mutation:%s*([%a%s]+)")
                                 or text:match("^([%a%s]+)%s*%([%d%.]+[KkMmBb%s/]*%)")
-
                             if mutCandidate then
                                 if registerDiscoveredMutation(mutCandidate) then newMutations += 1 end
-                            else
-                                local parentName = (desc.Parent and desc.Parent.Name:lower()) or ""
-                                local grandParentName = (desc.Parent and desc.Parent.Parent and desc.Parent.Parent.Name:lower()) or ""
-                                if parentName:find("mutation") or grandParentName:find("mutation") then
-                                    if not text:find("%d") and not FORBIDDEN_WORDS[text:lower()] and #text >= 3 then
-                                        if registerDiscoveredMutation(text) then newMutations += 1 end
-                                    end
-                                end
                             end
                         end
                     end
@@ -463,45 +557,20 @@ local function scanIndexBook()
         end
     end
 
-    for _, item in ipairs(ReplicatedStorage:GetDescendants()) do
-        local iName = item.Name:lower()
-        local parentName = (item.Parent and item.Parent.Name:lower()) or ""
+    -- 2. Scan ReplicatedStorage Configuration / Modules / Folders
+    local cardConfigs = ReplicatedStorage:FindFirstChild("Cards")
+        or ReplicatedStorage:FindFirstChild("CardData")
+        or ReplicatedStorage:FindFirstChild("Packs")
+        or ReplicatedStorage:FindFirstChild("Index")
+        or ReplicatedStorage:FindFirstChild("Mutations")
 
-        if parentName:find("mutation") then
-            if registerDiscoveredMutation(item.Name) then newMutations += 1 end
-            if item:IsA("StringValue") and item.Value ~= "" then
-                if registerDiscoveredMutation(item.Value) then newMutations += 1 end
-            end
-        elseif parentName:find("pack") then
-            if registerDiscoveredPack(item.Name) then newPacks += 1 end
-            if item:IsA("StringValue") and item.Value ~= "" then
-                if registerDiscoveredPack(item.Value) then newPacks += 1 end
-            end
-        end
-
-        if iName:find("pack") and not parentName:find("pack") and not item:IsA("Folder") then
-            if registerDiscoveredPack(item.Name) then newPacks += 1 end
-        elseif iName:find("mutation") and not parentName:find("mutation") and not item:IsA("Folder") then
-            if registerDiscoveredMutation(item.Name) then newMutations += 1 end
-        end
-    end
-
-    for _, desc in ipairs(workspace:GetDescendants()) do
-        if desc:IsA("BillboardGui") then
-            for _, label in ipairs(desc:GetDescendants()) do
-                if label:IsA("TextLabel") and label.Text:find("Pack") then
-                    local m, p = label.Text:match("^([%a%s]+)%s+([%a%s]+Pack)")
-                    if m and p then
-                        local cleanM = m:gsub("^%s+", ""):gsub("%s+$", "")
-                        local cleanP = p:gsub("^%s+", ""):gsub("%s+$", "")
-                        if not FORBIDDEN_WORDS[cleanM:lower()] then
-                            if registerDiscoveredMutation(cleanM) then newMutations += 1 end
-                        end
-                        if not FORBIDDEN_WORDS[cleanP:lower()] then
-                            if registerDiscoveredPack(cleanP) then newPacks += 1 end
-                        end
-                    end
-                end
+    if cardConfigs then
+        for _, desc in ipairs(cardConfigs:GetDescendants()) do
+            local n = desc.Name
+            if n:find("Pack") and registerDiscoveredPack(n) then
+                newPacks += 1
+            elseif not FORBIDDEN_WORDS[n:lower()] and #n > 2 and registerDiscoveredMutation(n) then
+                newMutations += 1
             end
         end
     end
@@ -510,60 +579,67 @@ local function scanIndexBook()
 end
 
 -- ------------------------------------------------------------------------------
--- 5. FÖRDERBAND-SCANNER & SICHERER FILTER-ABGLEICH
+-- 5. FÖRDERBAND SCANNER & PARSER (CONVEYOR MONITOR)
 -- ------------------------------------------------------------------------------
+local KNOWN_MUTATION_KEYWORDS = {
+    "venomous", "golden", "diamond", "rainbow", "sakura", "candy", "blessed",
+    "radioactive", "glitch", "starfallen", "admin", "corrupt", "void", "shiny",
+    "electric", "dark", "frost", "inferno", "divine", "mythic", "celestial"
+}
+
 local recentlyPurchasedPacks = {}
 
-local function isPlayerCharacter(inst)
-    if not inst then return false end
-    if Players:GetPlayerFromCharacter(inst) then return true end
-    if inst:FindFirstChildOfClass("Humanoid") then return true end
-    return false
-end
-
 local function parsePackInfo(packInstance)
-    local titleTexts = {}
-    local prompt = nil
+    local detectedPack = "Unknown Pack"
+    local detectedMutation = "Normal (Keine)"
     local detectedPrice = ""
+    local combinedText = ""
+    local titleTexts = {}
+    local prompt = packInstance:FindFirstChildWhichIsA("ProximityPrompt", true)
 
     for _, desc in ipairs(packInstance:GetDescendants()) do
-        if desc:IsA("TextLabel") or desc:IsA("TextButton") then
+        if desc:IsA("TextLabel") or desc:IsA("TextBox") then
             local txt = desc.Text:gsub("^%s+", ""):gsub("%s+$", "")
             if txt ~= "" then
+                combinedText = combinedText .. " " .. txt
                 table.insert(titleTexts, txt)
-                local priceMatch = txt:match("(%$[0-9%.]+%a*)") or txt:match("([0-9%.]+%s*[KMBTPESxd]+/[0-9%.]+%s*[KMBTPESxd]+)")
-                if priceMatch and detectedPrice == "" then
-                    detectedPrice = priceMatch
+
+                if txt:find("%$%s*[%d%.]+%s*[KkMmBbTt%a]*") or txt:find("[%d%.]+[KkMmBb%a]*%s*/%s*[%d%.]+[KkMmBb%a]*") then
+                    detectedPrice = txt
                 end
             end
-        elseif desc:IsA("ProximityPrompt") then
-            prompt = desc
-        end
-    end
-    table.insert(titleTexts, packInstance.Name)
-
-    local combinedText = table.concat(titleTexts, " ")
-    local detectedMutation = "Normal (Keine)"
-    local detectedPack = "Unknown Pack"
-
-    for _, mut in ipairs(SETTINGS.AvailableMutations) do
-        if mut ~= "Any" and mut ~= "Normal (Keine)" and mut ~= "None" and mut ~= "Nur mit Mutation (Any Mutation)" then
-            if string.find(combinedText:lower(), mut:lower(), 1, true) then
-                detectedMutation = mut
-                break
+        elseif desc:IsA("BillboardGui") or desc:IsA("SurfaceGui") then
+            local bName = desc.Name
+            if bName:find("Pack") then
+                registerDiscoveredPack(bName)
+                detectedPack = bName
             end
         end
     end
 
+    -- 1. Match known packs from AvailablePacks
     for _, p in ipairs(SETTINGS.AvailablePacks) do
         if p ~= "All" then
-            if string.find(combinedText:lower(), p:lower(), 1, true) then
+            local pLower = p:lower()
+            if combinedText:lower():find(pLower, 1, true) or packInstance.Name:lower():find(pLower, 1, true) then
                 detectedPack = p
                 break
             end
         end
     end
 
+    -- 2. Match known mutations from AvailableMutations
+    for _, m in ipairs(SETTINGS.AvailableMutations) do
+        if m ~= "Any" and m ~= "Normal (Keine)" and m ~= "Nur mit Mutation (Any Mutation)" then
+            local mLower = m:lower()
+            if combinedText:lower():find(mLower, 1, true) or packInstance.Name:lower():find(mLower, 1, true) then
+                detectedMutation = m
+                break
+            end
+        end
+    end
+
+    -- 3. Heuristic extraction from title texts (e.g., "Venomous Dawn Pack")
     for _, line in ipairs(titleTexts) do
         local mCandidate, pCandidate = line:match("^([%a%s]+)%s+([%a%s]+Pack)")
         if mCandidate and pCandidate then
@@ -614,7 +690,6 @@ local function parsePackInfo(packInstance)
 end
 
 local function matchesConveyorFilter(packInfo)
-    -- Schutz: Wenn der Auto-Kauf deaktiviert ist, NIEMALS kaufen!
     if not SETTINGS.ConveyorAutoBuyEnabled then
         return false
     end
@@ -683,9 +758,9 @@ local function buyConveyorPack(packInfo)
     if buyRemote then
         pcall(function()
             if buyRemote:IsA("RemoteEvent") then
-                buyRemote:FireServer(packInfo.Instance, packInfo.Name)
+                buyRemote:FireServer(packInfo.Name, packInfo.Instance)
             else
-                buyRemote:InvokeServer(packInfo.Instance, packInfo.Name)
+                buyRemote:InvokeServer(packInfo.Name, packInfo.Instance)
             end
         end)
         bought = true
@@ -722,34 +797,28 @@ local function scanConveyorPacks()
         end
 
         if not targetModel or seenInstances[targetModel] then return end
-        if isPlayerCharacter(targetModel) then return end
 
         local mName = targetModel.Name:lower()
-        if mName:find("spawn") or mName:find("pedestal") or mName:find("roller") or mName:find("machine") or mName:find("tower") or mName:find("plot") or mName:find("base") then
+        if mName:find("ground") or mName:find("base") or mName:find("floor") or mName:find("terrain") then
             return
         end
 
-        local prompt = targetModel:FindFirstChildWhichIsA("ProximityPrompt", true)
-        local hasPackBillboard = false
         local hasBuyPrompt = false
+        local hasPackBillboard = false
 
-        if prompt then
-            local act = (prompt.ActionText or ""):lower()
-            local obj = (prompt.ObjectText or ""):lower()
-            if act:find("buy") or act:find("purchase") or obj:find("buy") or obj:find("pack") then
-                hasBuyPrompt = true
-            end
-        end
-
-        for _, bg in ipairs(targetModel:GetDescendants()) do
-            if bg:IsA("BillboardGui") then
-                for _, lbl in ipairs(bg:GetDescendants()) do
-                    if lbl:IsA("TextLabel") or lbl:IsA("TextButton") then
-                        local txt = lbl.Text:lower()
-                        if txt:find("pack") or txt:find("%$") then
-                            hasPackBillboard = true
-                            break
-                        end
+        for _, d in ipairs(targetModel:GetDescendants()) do
+            if d:IsA("ProximityPrompt") then
+                local aText = (d.ActionText or ""):lower()
+                local oText = (d.ObjectText or ""):lower()
+                if aText:find("buy") or aText:find("pack") or oText:find("pack") or oText:find("buy") then
+                    hasBuyPrompt = true
+                    break
+                end
+            elseif d:IsA("BillboardGui") or d:IsA("SurfaceGui") then
+                for _, lbl in ipairs(d:GetDescendants()) do
+                    if (lbl:IsA("TextLabel") or lbl:IsA("TextBox")) and lbl.Text:find("Pack") then
+                        hasPackBillboard = true
+                        break
                     end
                 end
             end
@@ -775,57 +844,166 @@ local function scanConveyorPacks()
 end
 
 -- ------------------------------------------------------------------------------
--- 6. AUTO PACK SPAWNER (GRÜNER SOCKEL)
+-- 6. AUTO PACK SPAWNER (GRÜNER SOCKEL IN DER BASIS / CONVEYOR PEDESTAL)
 -- ------------------------------------------------------------------------------
-local function triggerSpawnPackPedestal()
-    local triggered = false
-    local baseFolder = getPlayerBase() or workspace
+local cachedSpawner = nil
 
-    for _, desc in ipairs(baseFolder:GetDescendants()) do
-        local nameLower = desc.Name:lower()
-        local isSpawner = nameLower:find("spawnpack") or nameLower:find("packspawn")
-            or (nameLower:find("spawn") and nameLower:find("stand"))
-            or (nameLower:find("spawn") and nameLower:find("pedestal"))
+local function isSpawnerObject(inst)
+    if not inst then return false end
+    local n = inst.Name:lower()
 
-        if not isSpawner and desc:IsA("BillboardGui") then
-            for _, label in ipairs(desc:GetDescendants()) do
-                if label:IsA("TextLabel") and label.Text:lower():find("spawn pack") then
-                    isSpawner = true
-                    break
+    if (n:find("spawn") and (n:find("pack") or n:find("card") or n:find("stand") or n:find("pedestal") or n:find("button") or n:find("pad") or n:find("conveyor")))
+        or n == "spawnpack" or n == "packspawn" or n == "spawn_pack" or n == "pack_spawn"
+        or n == "spawner" or n == "spawn" then
+        return true
+    end
+
+    for _, desc in ipairs(inst:GetDescendants()) do
+        if desc:IsA("SurfaceGui") or desc:IsA("BillboardGui") then
+            for _, txt in ipairs(desc:GetDescendants()) do
+                if (txt:IsA("TextLabel") or txt:IsA("TextButton")) and txt.Text then
+                    local tLower = txt.Text:lower()
+                    if tLower:find("spawn") and (tLower:find("pack") or tLower:find("card")) then
+                        return true
+                    end
                 end
             end
+        elseif desc:IsA("ProximityPrompt") then
+            local aText = (desc.ActionText or ""):lower()
+            local oText = (desc.ObjectText or ""):lower()
+            if aText:find("spawn") or oText:find("spawn") then
+                return true
+            end
         end
+    end
+    return false
+end
 
-        if isSpawner then
-            local physicalTarget = (desc:IsA("BillboardGui") and (desc.Adornee or desc.Parent)) or desc
-            if physicalTarget then
-                local prompt = physicalTarget:FindFirstChildWhichIsA("ProximityPrompt", true)
-                    or desc:FindFirstChildWhichIsA("ProximityPrompt", true)
-                if prompt then
-                    activatePrompt(prompt)
-                    triggered = true
-                    break
+local function activateSpawnerTarget(target)
+    if not target or not target.Parent then return false end
+    local triggered = false
+
+    -- 1. ClickDetector on target or descendants
+    local cd = target:IsA("ClickDetector") and target or target:FindFirstChildWhichIsA("ClickDetector", true)
+    if cd then
+        if activateClickDetector(cd) then triggered = true end
+    end
+
+    -- 2. ProximityPrompt on target or descendants
+    local prompt = target:IsA("ProximityPrompt") and target or target:FindFirstChildWhichIsA("ProximityPrompt", true)
+    if prompt then
+        if activatePrompt(prompt) then triggered = true end
+    end
+
+    -- 3. SurfaceGui / BillboardGui Buttons
+    for _, desc in ipairs(target:GetDescendants()) do
+        if desc:IsA("GuiButton") then
+            if clickButton(desc) then triggered = true end
+        end
+    end
+
+    -- 4. TouchPart (Physical step/collision)
+    local part = target:IsA("BasePart") and target or target:FindFirstChildWhichIsA("BasePart", true)
+    if part then
+        if touchPart(part) then triggered = true end
+    end
+
+    return triggered
+end
+
+local function fireSpawnRemotes()
+    local fired = false
+    for _, desc in ipairs(ReplicatedStorage:GetDescendants()) do
+        if desc:IsA("RemoteEvent") or desc:IsA("RemoteFunction") then
+            local n = desc.Name:lower()
+            if (n:find("spawn") and (n:find("pack") or n:find("card") or n:find("conveyor") or n:find("belt")))
+                or n == "spawnpack" or n == "spawn_pack"
+                or n == "rollpack" or n == "roll_pack"
+                or n == "requestspawn" or n == "spawn" then
+                pcall(function()
+                    if desc:IsA("RemoteEvent") then
+                        desc:FireServer()
+                    else
+                        desc:InvokeServer()
+                    end
+                    fired = true
+                end)
+            end
+        end
+    end
+    return fired
+end
+
+local function triggerSpawnPackPedestal()
+    local triggered = false
+
+    -- 1. Try cached spawner if still valid
+    if cachedSpawner and cachedSpawner.Parent then
+        if activateSpawnerTarget(cachedSpawner) then
+            triggered = true
+        else
+            cachedSpawner = nil
+        end
+    end
+
+    -- 2. Search near player character (within 55 studs)
+    if not triggered then
+        local character = player.Character
+        local hrp = character and character:FindFirstChild("HumanoidRootPart")
+        if hrp then
+            local myPos = hrp.Position
+            local nearbyCandidates = {}
+
+            local function checkCandidate(item)
+                if not item or not item.Parent then return end
+                local pos = nil
+                if item:IsA("BasePart") then
+                    pos = item.Position
+                elseif item:IsA("Model") then
+                    pos = item.PrimaryPart and item.PrimaryPart.Position or (item:FindFirstChildWhichIsA("BasePart") and item:FindFirstChildWhichIsA("BasePart").Position)
                 end
+                if pos and (pos - myPos).Magnitude <= 55 then
+                    table.insert(nearbyCandidates, item)
+                end
+            end
 
-                local part = physicalTarget:IsA("BasePart") and physicalTarget or physicalTarget:FindFirstChildWhichIsA("BasePart", true)
-                if part then
-                    touchPart(part)
-                    triggered = true
-                    break
+            local base = getPlayerBase()
+            if base then
+                for _, ch in ipairs(base:GetChildren()) do checkCandidate(ch) end
+            end
+            for _, ch in ipairs(workspace:GetChildren()) do checkCandidate(ch) end
+
+            for _, cand in ipairs(nearbyCandidates) do
+                if isSpawnerObject(cand) then
+                    if activateSpawnerTarget(cand) then
+                        cachedSpawner = cand
+                        triggered = true
+                        break
+                    end
                 end
             end
         end
     end
 
-    local spawnRemote = findGameRemote({"SpawnPack", "RequestSpawnPack", "BaseSpawnPack", "SpawnCardPack"})
-    if spawnRemote then
-        pcall(function()
-            if spawnRemote:IsA("RemoteEvent") then
-                spawnRemote:FireServer()
-            else
-                spawnRemote:InvokeServer()
+    -- 3. Search player base or workspace descendants
+    if not triggered then
+        local baseFolder = getPlayerBase() or workspace:FindFirstChild("Bases") or workspace
+        for _, desc in ipairs(baseFolder:GetDescendants()) do
+            if desc:IsA("Model") or desc:IsA("BasePart") or desc:IsA("SurfaceGui") or desc:IsA("BillboardGui") then
+                if isSpawnerObject(desc) then
+                    local target = (desc:IsA("SurfaceGui") or desc:IsA("BillboardGui")) and (desc.Adornee or desc.Parent) or desc
+                    if activateSpawnerTarget(target) then
+                        cachedSpawner = target
+                        triggered = true
+                        break
+                    end
+                end
             end
-        end)
+        end
+    end
+
+    -- 4. Remote events fallback
+    if fireSpawnRemotes() then
         triggered = true
     end
 
@@ -837,7 +1015,7 @@ local function triggerSpawnPackPedestal()
 end
 
 -- ------------------------------------------------------------------------------
--- 7. AUTO RANK ROLL (RANK-MASCHINE)
+-- 7. AUTO RANK ROLL (RANK-MASCHINE TARGET F BIS 神)
 -- ------------------------------------------------------------------------------
 local function executeRankRoll()
     local rankGui = player:FindFirstChild("PlayerGui") and (
@@ -860,208 +1038,240 @@ local function executeRankRoll()
 
         local function syncCheckbox(keyword, desiredState)
             for _, desc in ipairs(rankGui:GetDescendants()) do
-                local nameLower = desc.Name:lower()
-                local textLower = desc:IsA("TextLabel") and desc.Text:lower() or (desc:IsA("GuiButton") and desc.Text:lower() or "")
-                if nameLower:find(keyword) or textLower:find(keyword) then
-                    local btn = desc:IsA("GuiButton") and desc or desc:FindFirstChildWhichIsA("GuiButton", true) or (desc.Parent and desc.Parent:FindFirstChildWhichIsA("GuiButton"))
-                    if btn then
-                        local isChecked = (btn.Text:find("☑") or btn.Text:find("true") or btn.Name:find("On") or btn.BackgroundColor3 == Color3.fromRGB(40, 120, 70)) ~= nil
-                        if isChecked ~= desiredState then
-                            clickButton(btn)
+                if desc:IsA("GuiButton") or desc:IsA("Frame") then
+                    local nameL = desc.Name:lower()
+                    if nameL:find(keyword) then
+                        local btn = desc:IsA("GuiButton") and desc or desc:FindFirstChildWhichIsA("GuiButton")
+                        if btn then
+                            local hasCheck = btn:FindFirstChild("Check") or btn:FindFirstChild("Tick") or (btn:IsA("TextButton") and btn.Text:find("✓"))
+                            if (desiredState and not hasCheck) or (not desiredState and hasCheck) then
+                                clickButton(btn)
+                            end
                         end
                     end
                 end
             end
         end
 
-        syncCheckbox("gems first", SETTINGS.RankUseGemsFirst)
         syncCheckbox("cash", SETTINGS.RankUseCash)
+        syncCheckbox("gemsfirst", SETTINGS.RankUseGemsFirst)
         syncCheckbox("gems", SETTINGS.RankUseGems)
 
-        local startBtn = nil
         for _, desc in ipairs(rankGui:GetDescendants()) do
-            if desc:IsA("GuiButton") then
-                local txt = (desc:IsA("TextButton") and desc.Text or desc.Name):lower()
-                if txt:find("start") or txt:find("roll") then
-                    startBtn = desc
-                    break
+            if desc:IsA("GuiButton") and desc.Name:lower():find("start") or (desc:IsA("TextButton") and desc.Text:lower():find("start roll")) then
+                clickButton(desc)
+                STATS.RankRolls += 1
+                break
+            end
+        end
+    else
+        local rankRemote = findGameRemote({"RollRank", "UpgradeRank", "GradeRoll", "AutoRollRank"})
+        if rankRemote then
+            pcall(function()
+                if rankRemote:IsA("RemoteEvent") then
+                    rankRemote:FireServer(SETTINGS.TargetRank, SETTINGS.RankUseCash, SETTINGS.RankUseGems, SETTINGS.RankUseGemsFirst)
+                else
+                    rankRemote:InvokeServer(SETTINGS.TargetRank, SETTINGS.RankUseCash, SETTINGS.RankUseGems, SETTINGS.RankUseGemsFirst)
                 end
-            end
-        end
-        if startBtn then
-            clickButton(startBtn)
+                STATS.RankRolls += 1
+            end)
         end
     end
-
-    local rankMachine = workspace:FindFirstChild("Rank Machine", true)
-        or workspace:FindFirstChild("RankMachine", true)
-        or workspace:FindFirstChild("Grade Machine", true)
-    if rankMachine then
-        local prompt = rankMachine:FindFirstChildWhichIsA("ProximityPrompt", true)
-        if prompt then activatePrompt(prompt) end
-    end
-
-    local rankRemote = findGameRemote({"RollRank", "UpgradeRank", "RankMachineRoll", "AutoRollRank", "RollGrade"})
-    if rankRemote then
-        pcall(function()
-            local payload = {
-                TargetRank = SETTINGS.TargetRank,
-                UseCash = SETTINGS.RankUseCash,
-                UseGems = SETTINGS.RankUseGems,
-                UseGemsFirst = SETTINGS.RankUseGemsFirst
-            }
-            if rankRemote:IsA("RemoteEvent") then
-                rankRemote:FireServer(payload)
-                rankRemote:FireServer(SETTINGS.TargetRank, SETTINGS.RankUseCash, SETTINGS.RankUseGems, SETTINGS.RankUseGemsFirst)
-            else
-                rankRemote:InvokeServer(payload)
-            end
-        end)
-    end
-
-    STATS.RankRolls += 1
 end
 
 -- ------------------------------------------------------------------------------
--- 8. AUTO TRAIT ROLL
+-- 8. AUTO TRAIT ROLL (TRAIT ROLLER NPC, 1 GEM PER ROLL)
 -- ------------------------------------------------------------------------------
 local function executeTraitRoll()
-    local npc = workspace:FindFirstChild("Trait Roller", true) or workspace:FindFirstChild("TraitRoller", true)
-    if npc then
-        local prompt = npc:FindFirstChildWhichIsA("ProximityPrompt", true)
-        if prompt then activatePrompt(prompt) end
-    end
-
     local traitGui = player:FindFirstChild("PlayerGui") and (
         player.PlayerGui:FindFirstChild("TraitsMachine", true)
-        or player.PlayerGui:FindFirstChild("TraitMachine", true)
         or player.PlayerGui:FindFirstChild("TraitRoller", true)
+        or player.PlayerGui:FindFirstChild("TraitRoll", true)
     )
+
     if traitGui then
-        local autoBtn = nil
         for _, desc in ipairs(traitGui:GetDescendants()) do
             if desc:IsA("GuiButton") then
-                local txt = (desc:IsA("TextButton") and desc.Text or desc.Name):lower()
-                if txt:find("auto") or txt:find("roll") then
-                    autoBtn = desc
+                local bText = (desc:IsA("TextButton") and desc.Text or desc.Name):lower()
+                if bText:find("auto roll") or bText:find("roll") or desc.Name == "AutoRoll" then
+                    clickButton(desc)
+                    STATS.TraitRolls += 1
                     break
                 end
             end
         end
-        if autoBtn then
-            clickButton(autoBtn)
+    else
+        local traitNpc = workspace:FindFirstChild("Trait Roller", true)
+            or workspace:FindFirstChild("TraitRoller", true)
+            or workspace:FindFirstChild("Gojyo", true)
+
+        if traitNpc then
+            local prompt = traitNpc:FindFirstChildWhichIsA("ProximityPrompt", true)
+            if prompt then
+                activatePrompt(prompt)
+            end
+        end
+
+        local traitRemote = findGameRemote({"RollTrait", "RerollTrait", "TraitRoll", "BuyTraitRoll"})
+        if traitRemote then
+            pcall(function()
+                if traitRemote:IsA("RemoteEvent") then
+                    traitRemote:FireServer(SETTINGS.TargetTrait)
+                else
+                    traitRemote:InvokeServer(SETTINGS.TargetTrait)
+                end
+                STATS.TraitRolls += 1
+            end)
         end
     end
-
-    local traitRemote = findGameRemote({"RollTrait", "RerollTrait", "TraitRoll", "TraitMachineRoll", "AutoRollTrait"})
-    if traitRemote then
-        pcall(function()
-            if traitRemote:IsA("RemoteEvent") then
-                traitRemote:FireServer(SETTINGS.TargetTrait)
-            else
-                traitRemote:InvokeServer(SETTINGS.TargetTrait)
-            end
-        end)
-    end
-
-    STATS.TraitRolls += 1
 end
 
 -- ------------------------------------------------------------------------------
--- 9. AUTO TOWER REPLAY
+-- 9. AUTO TOWER REPLAY (INFINITY TOWER FLOOR REPLAY)
 -- ------------------------------------------------------------------------------
-local function executeTowerReplay()
-    local tower = workspace:FindFirstChild("InfinityTower", true)
-        or workspace:FindFirstChild("Tower", true)
+local function checkTowerEntrance()
+    local character = player.Character
+    local hrp = character and character:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
 
-    if not tower then
+    local towerDoor = workspace:FindFirstChild("TowerEntrance", true)
+        or workspace:FindFirstChild("InfinityTower", true)
+        or workspace:FindFirstChild("CastleDoor", true)
+
+    if not towerDoor then
         for _, desc in ipairs(workspace:GetDescendants()) do
-            if desc:IsA("BillboardGui") then
-                for _, lbl in ipairs(desc:GetDescendants()) do
-                    if lbl:IsA("TextLabel") and lbl.Text:match("Floor%s*%d+") then
-                        tower = desc.Adornee or desc.Parent
-                        break
-                    end
-                end
+            if desc:IsA("TextLabel") and (desc.Text:match("^Floor%s*%d+") or desc.Text:find("InfinityTower")) then
+                towerDoor = desc.Parent
+                break
             end
-            if tower then break end
         end
     end
 
-    if tower then
-        local prompt = tower:FindFirstChildWhichIsA("ProximityPrompt", true)
-        if prompt then activatePrompt(prompt) end
-        local part = tower:IsA("BasePart") and tower or tower:FindFirstChildWhichIsA("BasePart", true)
-        if part then touchPart(part) end
+    if towerDoor then
+        local prompt = towerDoor:FindFirstChildWhichIsA("ProximityPrompt", true)
+        if prompt then
+            activatePrompt(prompt)
+        end
     end
 
-    local towerRemote = findGameRemote({"EnterTower", "StartTower", "ReplayTower", "NextFloor", "TowerAction"})
+    local towerRemote = findGameRemote({"StartTower", "ReplayTower", "EnterFloor", "TowerReplay", "StartFloor"})
     if towerRemote then
         pcall(function()
             if towerRemote:IsA("RemoteEvent") then
-                towerRemote:FireServer("Replay")
+                towerRemote:FireServer()
             else
-                towerRemote:InvokeServer("Replay")
+                towerRemote:InvokeServer()
             end
+            STATS.TowerFloorsCleared += 1
         end)
     end
-
-    STATS.TowerFloorsCleared += 1
 end
 
 -- ------------------------------------------------------------------------------
--- 10. UI FACTORY
+-- 10. OPTIMIERUNGEN & UTILITY (ANTI-AFK & FPS BOOSTER)
 -- ------------------------------------------------------------------------------
-local function addCorner(inst, radius)
-    local c = Instance.new("UICorner")
-    c.CornerRadius = UDim.new(0, radius or 6)
-    c.Parent = inst
-    return c
+local function setupAntiAFK()
+    player.Idled:Connect(function()
+        if SETTINGS.AntiAFKEnabled then
+            local VirtualUser = game:GetService("VirtualUser")
+            if VirtualUser then
+                VirtualUser:CaptureController()
+                VirtualUser:ClickButton2(Vector2.new(0, 0))
+            end
+        end
+    end)
 end
 
-local function addStroke(inst, color, thickness)
-    local s = Instance.new("UIStroke")
-    s.Color = color or Color3.fromRGB(55, 60, 75)
-    s.Thickness = thickness or 1
-    s.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-    s.Parent = inst
-    return s
+local function applyFPSBoost()
+    if not SETTINGS.FPSEnabled then return end
+    pcall(function()
+        settings().Rendering.QualityLevel = 1
+        for _, v in ipairs(workspace:GetDescendants()) do
+            if v:IsA("BasePart") and not v.Parent:FindFirstChild("Humanoid") then
+                v.Material = Enum.Material.SmoothPlastic
+                v.Reflectance = 0
+            elseif v:IsA("Decal") or v:IsA("Texture") then
+                v.Transparency = 0.5
+            elseif v:IsA("ParticleEmitter") or v:IsA("Trail") then
+                v.Enabled = false
+            end
+        end
+    end)
 end
 
-local function createLabel(name, size, pos, text, parent, align, color, font, textSize)
-    local lbl = Instance.new("TextLabel")
-    lbl.Name = name
-    lbl.Size = size
-    lbl.Position = pos
-    lbl.Text = text or ""
-    lbl.TextColor3 = color or Color3.fromRGB(235, 235, 245)
-    lbl.TextSize = textSize or 13
-    lbl.Font = font or Enum.Font.GothamMedium
-    lbl.BackgroundTransparency = 1
-    lbl.TextXAlignment = align or Enum.TextXAlignment.Left
-    lbl.Parent = parent
-    return lbl
+local function setupKeybinds()
+    UserInputService.InputBegan:Connect(function(input, gameProcessed)
+        if gameProcessed then return end
+        if input.KeyCode == Enum.KeyCode.RightControl or input.KeyCode == Enum.KeyCode.Insert then
+            SETTINGS.GuiVisible = not SETTINGS.GuiVisible
+            local parentGui = getSafeGuiParent()
+            local screenGui = parentGui:FindFirstChild("AnimeCardFarmProGUI")
+            if screenGui then
+                local mainFrame = screenGui:FindFirstChild("MainFrame")
+                local miniPill = screenGui:FindFirstChild("MiniPill")
+                if mainFrame then
+                    mainFrame.Visible = SETTINGS.GuiVisible and not SETTINGS.IsMinimised
+                end
+                if miniPill then
+                    miniPill.Visible = SETTINGS.GuiVisible and SETTINGS.IsMinimised
+                end
+            end
+        end
+    end)
 end
 
-local function createButton(name, size, pos, text, parent, bgCol)
+-- ------------------------------------------------------------------------------
+-- 11. UI STYLING & HELPERS
+-- ------------------------------------------------------------------------------
+local function addCorner(instance, radius)
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, radius or 8)
+    corner.Parent = instance
+    return corner
+end
+
+local function addStroke(instance, color, thickness)
+    local stroke = Instance.new("UIStroke")
+    stroke.Color = color or Color3.fromRGB(50, 55, 70)
+    stroke.Thickness = thickness or 1
+    stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+    stroke.Parent = instance
+    return stroke
+end
+
+local function createLabel(name, size, pos, text, parent, align, color, font, fontSize)
+    local label = Instance.new("TextLabel")
+    label.Name = name
+    label.Size = size
+    label.Position = pos
+    label.Text = text or ""
+    label.TextColor3 = color or Color3.fromRGB(220, 225, 235)
+    label.Font = font or Enum.Font.Gotham
+    label.TextSize = fontSize or 13
+    label.TextXAlignment = align or Enum.TextXAlignment.Left
+    label.BackgroundTransparency = 1
+    label.Parent = parent
+    return label
+end
+
+local function createButton(name, size, pos, text, parent, bgColor)
     local btn = Instance.new("TextButton")
     btn.Name = name
     btn.Size = size
     btn.Position = pos
     btn.Text = text or ""
-    btn.TextColor3 = Color3.fromRGB(255, 255, 255)
-    btn.BackgroundColor3 = bgCol or Color3.fromRGB(42, 45, 58)
-    btn.TextSize = 13
+    btn.TextColor3 = Color3.fromRGB(240, 240, 245)
     btn.Font = Enum.Font.GothamBold
+    btn.TextSize = 13
+    btn.BackgroundColor3 = bgColor or Color3.fromRGB(36, 38, 50)
     btn.AutoButtonColor = true
     addCorner(btn, 6)
-    addStroke(btn, Color3.fromRGB(65, 70, 85), 1)
     btn.Parent = parent
     return btn
 end
 
-local function updateToggleButtonStyle(button, isEnabled)
-    if isEnabled then
+local function updateToggleButtonStyle(button, state)
+    if state then
         button.BackgroundColor3 = Color3.fromRGB(36, 145, 78)
         button.TextColor3 = Color3.fromRGB(255, 255, 255)
     else
@@ -1128,8 +1338,197 @@ local function getPlayerCurrencies()
 end
 
 -- ------------------------------------------------------------------------------
--- 11. UI TABS ERSTELLUNG
+-- 12. UI MODAL SELECTION LIST & TABS ERSTELLUNG
 -- ------------------------------------------------------------------------------
+local activeScreenGui = nil
+local activeToastLabel = nil
+
+local function showToast(message)
+    if activeToastLabel and activeToastLabel.Parent then
+        activeToastLabel.Text = message
+    end
+end
+
+local currentModal = nil
+
+local function openSelectionModal(titleText, items, currentSelection, onSelect)
+    if currentModal and currentModal.Parent then
+        currentModal:Destroy()
+        currentModal = nil
+    end
+
+    local parentGui = activeScreenGui or getSafeGuiParent():FindFirstChild("AnimeCardFarmProGUI")
+    if not parentGui then return end
+
+    -- Dim Backdrop
+    local backdrop = Instance.new("TextButton")
+    backdrop.Name = "SelectionModalBackdrop"
+    backdrop.Size = UDim2.new(1, 0, 1, 0)
+    backdrop.Position = UDim2.new(0, 0, 0, 0)
+    backdrop.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    backdrop.BackgroundTransparency = 0.55
+    backdrop.Text = ""
+    backdrop.AutoButtonColor = false
+    backdrop.ZIndex = 50
+    backdrop.Parent = parentGui
+    currentModal = backdrop
+
+    -- Modal Container
+    local modalFrame = Instance.new("Frame")
+    modalFrame.Name = "ModalFrame"
+    modalFrame.Size = UDim2.new(0, 480, 0, 400)
+    modalFrame.Position = UDim2.new(0.5, -240, 0.5, -200)
+    modalFrame.BackgroundColor3 = Color3.fromRGB(20, 22, 30)
+    modalFrame.ZIndex = 51
+    addCorner(modalFrame, 10)
+    addStroke(modalFrame, Color3.fromRGB(55, 105, 205), 1.8)
+    modalFrame.Parent = backdrop
+
+    -- Header
+    local header = Instance.new("Frame")
+    header.Name = "Header"
+    header.Size = UDim2.new(1, 0, 0, 42)
+    header.BackgroundColor3 = Color3.fromRGB(26, 29, 40)
+    header.ZIndex = 52
+    addCorner(header, 10)
+    header.Parent = modalFrame
+
+    local titleLbl = createLabel("Title", UDim2.new(1, -70, 1, 0), UDim2.new(0, 14, 0, 0), titleText .. string.format(" (%d)", #items), header, Enum.TextXAlignment.Left, Color3.fromRGB(255, 255, 255), Enum.Font.GothamBold, 14)
+    titleLbl.ZIndex = 53
+
+    local closeBtn = createButton("CloseBtn", UDim2.new(0, 32, 0, 28), UDim2.new(1, -40, 0, 7), "✕", header, Color3.fromRGB(160, 40, 40))
+    closeBtn.ZIndex = 53
+    closeBtn.MouseButton1Click:Connect(function()
+        if backdrop and backdrop.Parent then backdrop:Destroy() end
+        currentModal = nil
+    end)
+    backdrop.MouseButton1Click:Connect(function()
+        if backdrop and backdrop.Parent then backdrop:Destroy() end
+        currentModal = nil
+    end)
+
+    -- Search Box
+    local searchFrame = Instance.new("Frame")
+    searchFrame.Name = "SearchFrame"
+    searchFrame.Size = UDim2.new(1, -24, 0, 36)
+    searchFrame.Position = UDim2.new(0, 12, 0, 50)
+    searchFrame.BackgroundColor3 = Color3.fromRGB(28, 31, 42)
+    searchFrame.ZIndex = 52
+    addCorner(searchFrame, 6)
+    addStroke(searchFrame, Color3.fromRGB(48, 55, 75), 1)
+    searchFrame.Parent = modalFrame
+
+    local searchBox = Instance.new("TextBox")
+    searchBox.Name = "SearchBox"
+    searchBox.Size = UDim2.new(1, -16, 1, 0)
+    searchBox.Position = UDim2.new(0, 8, 0, 0)
+    searchBox.BackgroundTransparency = 1
+    searchBox.PlaceholderText = LANGUAGES[SETTINGS.Language].SearchPlaceholder or "🔍 Suchen... (z.B. Dawn, Shiny)"
+    searchBox.PlaceholderColor3 = Color3.fromRGB(120, 130, 155)
+    searchBox.Text = ""
+    searchBox.TextColor3 = Color3.fromRGB(240, 240, 255)
+    searchBox.TextSize = 13
+    searchBox.Font = Enum.Font.Gotham
+    searchBox.TextXAlignment = Enum.TextXAlignment.Left
+    searchBox.ClearTextOnFocus = false
+    searchBox.ZIndex = 53
+    searchBox.Parent = searchFrame
+
+    -- Scrolling List Frame
+    local scrollFrame = Instance.new("ScrollingFrame")
+    scrollFrame.Name = "ScrollList"
+    scrollFrame.Size = UDim2.new(1, -24, 1, -100)
+    scrollFrame.Position = UDim2.new(0, 12, 0, 92)
+    scrollFrame.BackgroundColor3 = Color3.fromRGB(16, 18, 24)
+    scrollFrame.BackgroundTransparency = 0.5
+    scrollFrame.ScrollBarThickness = 6
+    scrollFrame.ScrollBarImageColor3 = Color3.fromRGB(60, 100, 180)
+    scrollFrame.ZIndex = 52
+    addCorner(scrollFrame, 6)
+    scrollFrame.Parent = modalFrame
+
+    local listLayout = Instance.new("UIListLayout")
+    listLayout.Padding = UDim.new(0, 4)
+    listLayout.SortOrder = Enum.SortOrder.LayoutOrder
+    listLayout.Parent = scrollFrame
+
+    local padding = Instance.new("UIPadding")
+    padding.PaddingTop = UDim.new(0, 4)
+    padding.PaddingBottom = UDim.new(0, 4)
+    padding.PaddingLeft = UDim.new(0, 4)
+    padding.PaddingRight = UDim.new(0, 8)
+    padding.Parent = scrollFrame
+
+    local function populateList(filterQuery)
+        for _, ch in ipairs(scrollFrame:GetChildren()) do
+            if ch:IsA("GuiButton") or ch:IsA("Frame") then ch:Destroy() end
+        end
+
+        local qLower = filterQuery:lower():gsub("^%s+", ""):gsub("%s+$", "")
+        local displayedCount = 0
+
+        for idx, item in ipairs(items) do
+            local matches = true
+            if qLower ~= "" then
+                matches = item:lower():find(qLower, 1, true) ~= nil
+            end
+
+            if matches then
+                displayedCount += 1
+                local isCurrent = (item == currentSelection)
+                local rowBtn = Instance.new("TextButton")
+                rowBtn.Name = "Item_" .. idx
+                rowBtn.Size = UDim2.new(1, 0, 0, 34)
+                rowBtn.ZIndex = 53
+                addCorner(rowBtn, 6)
+
+                if isCurrent then
+                    rowBtn.BackgroundColor3 = Color3.fromRGB(38, 95, 175)
+                    rowBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+                    rowBtn.Font = Enum.Font.GothamBold
+                    rowBtn.Text = "  ✓  " .. item .. "  [" .. (LANGUAGES[SETTINGS.Language].SelectedBadge or "Aktiv") .. "]"
+                else
+                    rowBtn.BackgroundColor3 = Color3.fromRGB(26, 29, 39)
+                    rowBtn.TextColor3 = Color3.fromRGB(215, 220, 240)
+                    rowBtn.Font = Enum.Font.GothamMedium
+                    rowBtn.Text = "     " .. item
+                end
+
+                rowBtn.TextSize = 13
+                rowBtn.TextXAlignment = Enum.TextXAlignment.Left
+                rowBtn.Parent = scrollFrame
+
+                rowBtn.MouseEnter:Connect(function()
+                    if not isCurrent then
+                        rowBtn.BackgroundColor3 = Color3.fromRGB(36, 42, 58)
+                    end
+                end)
+                rowBtn.MouseLeave:Connect(function()
+                    if not isCurrent then
+                        rowBtn.BackgroundColor3 = Color3.fromRGB(26, 29, 39)
+                    end
+                end)
+
+                rowBtn.MouseButton1Click:Connect(function()
+                    if backdrop and backdrop.Parent then backdrop:Destroy() end
+                    currentModal = nil
+                    if onSelect then
+                        onSelect(item)
+                    end
+                end)
+            end
+        end
+
+        scrollFrame.CanvasSize = UDim2.new(0, 0, 0, displayedCount * 38 + 10)
+    end
+
+    populateList("")
+
+    searchBox:GetPropertyChangedSignal("Text"):Connect(function()
+        populateList(searchBox.Text)
+    end)
+end
+
 local function createDashboardTab(onScanIndex, onStopAll)
     local frame = Instance.new("Frame")
     frame.Name = "DashboardTab"
@@ -1182,7 +1581,6 @@ local function createConveyorTab(onManualScan)
     hintLbl.TextWrapped = true
     registerText(hintLbl, "PackSpawnerHint")
 
-    -- 1. Reihe: Auto-Spawn und Auto-Kauf (Standardmäßig AUS!)
     local spawnToggle = createButton("SpawnToggle", UDim2.new(0.48, 0, 0, 42), UDim2.new(0, 10, 0, 45), "", frame)
     local function updateSpawnBtn()
         updateToggleButtonStyle(spawnToggle, SETTINGS.AutoSpawnEnabled)
@@ -1195,6 +1593,11 @@ local function createConveyorTab(onManualScan)
     spawnToggle.MouseButton1Click:Connect(function()
         SETTINGS.AutoSpawnEnabled = not SETTINGS.AutoSpawnEnabled
         updateSpawnBtn()
+        if SETTINGS.AutoSpawnEnabled then
+            showToast("▶ Auto-Pack Spawner: GESTARTET")
+        else
+            showToast("⏸ Auto-Pack Spawner: PAUSIERT")
+        end
     end)
 
     local buyToggle = createButton("BuyToggle", UDim2.new(0.48, 0, 0, 42), UDim2.new(0.52, 0, 0, 45), "", frame)
@@ -1209,9 +1612,13 @@ local function createConveyorTab(onManualScan)
     buyToggle.MouseButton1Click:Connect(function()
         SETTINGS.ConveyorAutoBuyEnabled = not SETTINGS.ConveyorAutoBuyEnabled
         updateBuyBtn()
+        if SETTINGS.ConveyorAutoBuyEnabled then
+            showToast("▶ Förderband Auto-Kauf: GESTARTET")
+        else
+            showToast("⏸ Förderband Auto-Kauf: PAUSIERT")
+        end
     end)
 
-    -- 2. Reihe: Schutz-Schalter "Nur Packs MIT Mutation kaufen"
     local mutOnlyToggle = createButton("MutOnlyToggle", UDim2.new(1, -20, 0, 36), UDim2.new(0, 10, 0, 95), "", frame)
     local function updateMutOnlyBtn()
         updateToggleButtonStyle(mutOnlyToggle, SETTINGS.RequireMutationOnly)
@@ -1226,55 +1633,54 @@ local function createConveyorTab(onManualScan)
         updateMutOnlyBtn()
     end)
 
-    -- 3. Reihe: Pack-Filter
-    local packIndex = 1
-    local packCycler = createButton("PackCycler", UDim2.new(1, -20, 0, 38), UDim2.new(0, 10, 0, 138), "", frame)
+    local packSelectBtn = createButton("PackSelectBtn", UDim2.new(1, -20, 0, 38), UDim2.new(0, 10, 0, 138), "", frame, Color3.fromRGB(34, 42, 60))
     local function updatePackText()
         local prefix = LANGUAGES[SETTINGS.Language].PackFilterPrefix or "📦 Pack: "
-        packCycler.Text = prefix .. SETTINGS.SelectedPackFilter
+        local hint = LANGUAGES[SETTINGS.Language].OpenListHint or "  ▾ (Liste öffnen)"
+        packSelectBtn.Text = prefix .. SETTINGS.SelectedPackFilter .. hint
     end
     packCyclerButtonRef = {
-        Button = packCycler,
+        Button = packSelectBtn,
         UpdateText = updatePackText
     }
-    registerText(packCycler, "PackFilterPrefix", function(pfx) return pfx .. SETTINGS.SelectedPackFilter end)
-    updatePackText()
-    packCycler.MouseButton1Click:Connect(function()
-        packIndex = (packIndex % #SETTINGS.AvailablePacks) + 1
-        SETTINGS.SelectedPackFilter = SETTINGS.AvailablePacks[packIndex]
-        updatePackText()
+    registerText(packSelectBtn, "PackFilterPrefix", function(pfx)
+        local hint = LANGUAGES[SETTINGS.Language].OpenListHint or "  ▾ (Liste öffnen)"
+        return pfx .. SETTINGS.SelectedPackFilter .. hint
     end)
-    packCycler.MouseButton2Click:Connect(function()
-        packIndex = (packIndex - 2 + #SETTINGS.AvailablePacks) % #SETTINGS.AvailablePacks + 1
-        SETTINGS.SelectedPackFilter = SETTINGS.AvailablePacks[packIndex]
-        updatePackText()
+    updatePackText()
+    packSelectBtn.MouseButton1Click:Connect(function()
+        local title = LANGUAGES[SETTINGS.Language].ModalTitlePack or "📦 Pack auswählen"
+        openSelectionModal(title, SETTINGS.AvailablePacks, SETTINGS.SelectedPackFilter, function(chosen)
+            SETTINGS.SelectedPackFilter = chosen
+            updatePackText()
+            showToast("📦 Filter: " .. chosen)
+        end)
     end)
 
-    -- 4. Reihe: Mutations-Filter
-    local mutationIndex = 1
-    local mutCycler = createButton("MutationCycler", UDim2.new(1, -20, 0, 38), UDim2.new(0, 10, 0, 182), "", frame)
+    local mutSelectBtn = createButton("MutationSelectBtn", UDim2.new(1, -20, 0, 38), UDim2.new(0, 10, 0, 182), "", frame, Color3.fromRGB(42, 36, 62))
     local function updateMutText()
         local prefix = LANGUAGES[SETTINGS.Language].MutationFilterPrefix or "✨ Mutation: "
-        mutCycler.Text = prefix .. SETTINGS.SelectedMutationFilter
+        local hint = LANGUAGES[SETTINGS.Language].OpenListHint or "  ▾ (Liste öffnen)"
+        mutSelectBtn.Text = prefix .. SETTINGS.SelectedMutationFilter .. hint
     end
     mutationCyclerButtonRef = {
-        Button = mutCycler,
+        Button = mutSelectBtn,
         UpdateText = updateMutText
     }
-    registerText(mutCycler, "MutationFilterPrefix", function(pfx) return pfx .. SETTINGS.SelectedMutationFilter end)
-    updateMutText()
-    mutCycler.MouseButton1Click:Connect(function()
-        mutationIndex = (mutationIndex % #SETTINGS.AvailableMutations) + 1
-        SETTINGS.SelectedMutationFilter = SETTINGS.AvailableMutations[mutationIndex]
-        updateMutText()
+    registerText(mutSelectBtn, "MutationFilterPrefix", function(pfx)
+        local hint = LANGUAGES[SETTINGS.Language].OpenListHint or "  ▾ (Liste öffnen)"
+        return pfx .. SETTINGS.SelectedMutationFilter .. hint
     end)
-    mutCycler.MouseButton2Click:Connect(function()
-        mutationIndex = (mutationIndex - 2 + #SETTINGS.AvailableMutations) % #SETTINGS.AvailableMutations + 1
-        SETTINGS.SelectedMutationFilter = SETTINGS.AvailableMutations[mutationIndex]
-        updateMutText()
+    updateMutText()
+    mutSelectBtn.MouseButton1Click:Connect(function()
+        local title = LANGUAGES[SETTINGS.Language].ModalTitleMutation or "✨ Mutation auswählen"
+        openSelectionModal(title, SETTINGS.AvailableMutations, SETTINGS.SelectedMutationFilter, function(chosen)
+            SETTINGS.SelectedMutationFilter = chosen
+            updateMutText()
+            showToast("✨ Filter: " .. chosen)
+        end)
     end)
 
-    -- 5. Reihe: Index-Scan Button
     local scanIndexBtn = createButton("ManualScanBtn", UDim2.new(1, -20, 0, 36), UDim2.new(0, 10, 0, 228), "", frame, Color3.fromRGB(38, 90, 175))
     registerText(scanIndexBtn, "ScanIndexManual")
     scanIndexBtn.MouseButton1Click:Connect(function()
@@ -1290,23 +1696,24 @@ local function createRankMachineTab()
     frame.Size = UDim2.new(1, 0, 1, 0)
     frame.BackgroundTransparency = 1
 
-    local rankIdx = 12
-    local rankBtn = createButton("TargetRankCycler", UDim2.new(1, -20, 0, 42), UDim2.new(0, 10, 0, 10), "", frame, Color3.fromRGB(90, 40, 140))
+    local rankBtn = createButton("TargetRankSelectBtn", UDim2.new(1, -20, 0, 42), UDim2.new(0, 10, 0, 10), "", frame, Color3.fromRGB(90, 40, 140))
     local function updateRankBtnText()
         local prefix = LANGUAGES[SETTINGS.Language].TargetRankPrefix or "🎯 Ziel-Rang: "
-        rankBtn.Text = prefix .. SETTINGS.TargetRank
+        local hint = LANGUAGES[SETTINGS.Language].OpenListHint or "  ▾ (Liste öffnen)"
+        rankBtn.Text = prefix .. SETTINGS.TargetRank .. hint
     end
-    registerText(rankBtn, "TargetRankPrefix", function(pfx) return pfx .. SETTINGS.TargetRank end)
+    registerText(rankBtn, "TargetRankPrefix", function(pfx)
+        local hint = LANGUAGES[SETTINGS.Language].OpenListHint or "  ▾ (Liste öffnen)"
+        return pfx .. SETTINGS.TargetRank .. hint
+    end)
     updateRankBtnText()
     rankBtn.MouseButton1Click:Connect(function()
-        rankIdx = (rankIdx % #RANK_OPTIONS) + 1
-        SETTINGS.TargetRank = RANK_OPTIONS[rankIdx]
-        updateRankBtnText()
-    end)
-    rankBtn.MouseButton2Click:Connect(function()
-        rankIdx = (rankIdx - 2 + #RANK_OPTIONS) % #RANK_OPTIONS + 1
-        SETTINGS.TargetRank = RANK_OPTIONS[rankIdx]
-        updateRankBtnText()
+        local title = LANGUAGES[SETTINGS.Language].ModalTitleRank or "🎯 Ziel-Rang auswählen"
+        openSelectionModal(title, RANK_OPTIONS, SETTINGS.TargetRank, function(chosen)
+            SETTINGS.TargetRank = chosen
+            updateRankBtnText()
+            showToast("🎯 Ziel-Rang: " .. chosen)
+        end)
     end)
 
     local function createCheckbox(name, pos, textKey, defaultVal, onToggle)
@@ -1364,23 +1771,24 @@ local function createTraitRollerTab()
     local costLbl = createLabel("CostHint", UDim2.new(1, -20, 0, 22), UDim2.new(0, 10, 0, 36), "", frame, Enum.TextXAlignment.Left, Color3.fromRGB(180, 185, 205), Enum.Font.Gotham, 12)
     registerText(costLbl, "TraitCostHint")
 
-    local traitIdx = 2
-    local traitBtn = createButton("TraitCycler", UDim2.new(1, -20, 0, 42), UDim2.new(0, 10, 0, 70), "", frame, Color3.fromRGB(50, 75, 135))
+    local traitBtn = createButton("TargetTraitSelectBtn", UDim2.new(1, -20, 0, 42), UDim2.new(0, 10, 0, 70), "", frame, Color3.fromRGB(50, 75, 135))
     local function updateTraitBtnText()
         local prefix = LANGUAGES[SETTINGS.Language].TargetTraitPrefix or "🧬 Ziel-Trait: "
-        traitBtn.Text = prefix .. SETTINGS.TargetTrait
+        local hint = LANGUAGES[SETTINGS.Language].OpenListHint or "  ▾ (Liste öffnen)"
+        traitBtn.Text = prefix .. SETTINGS.TargetTrait .. hint
     end
-    registerText(traitBtn, "TargetTraitPrefix", function(pfx) return pfx .. SETTINGS.TargetTrait end)
+    registerText(traitBtn, "TargetTraitPrefix", function(pfx)
+        local hint = LANGUAGES[SETTINGS.Language].OpenListHint or "  ▾ (Liste öffnen)"
+        return pfx .. SETTINGS.TargetTrait .. hint
+    end)
     updateTraitBtnText()
     traitBtn.MouseButton1Click:Connect(function()
-        traitIdx = (traitIdx % #TRAIT_OPTIONS) + 1
-        SETTINGS.TargetTrait = TRAIT_OPTIONS[traitIdx]
-        updateTraitBtnText()
-    end)
-    traitBtn.MouseButton2Click:Connect(function()
-        traitIdx = (traitIdx - 2 + #TRAIT_OPTIONS) % #TRAIT_OPTIONS + 1
-        SETTINGS.TargetTrait = TRAIT_OPTIONS[traitIdx]
-        updateTraitBtnText()
+        local title = LANGUAGES[SETTINGS.Language].ModalTitleTrait or "🧬 Ziel-Trait auswählen"
+        openSelectionModal(title, TRAIT_OPTIONS, SETTINGS.TargetTrait, function(chosen)
+            SETTINGS.TargetTrait = chosen
+            updateTraitBtnText()
+            showToast("🧬 Ziel-Trait: " .. chosen)
+        end)
     end)
 
     local autoTraitToggle = createButton("AutoTraitToggle", UDim2.new(1, -20, 0, 44), UDim2.new(0, 10, 0, 125), "", frame)
@@ -1523,7 +1931,7 @@ local function createSettingsTab()
 end
 
 -- ------------------------------------------------------------------------------
--- 12. HAUPTFENSTER, MINI-PILL & TOASTS
+-- 13. HAUPTFENSTER, FLOATING MINI-PILL & TOASTS
 -- ------------------------------------------------------------------------------
 local function createGUI(onScanIndex, onStopAll)
     local parentGui = getSafeGuiParent()
@@ -1563,329 +1971,4 @@ local function createGUI(onScanIndex, onStopAll)
         updateLanguage()
     end)
 
-    local miniBtn = createButton("MiniBtn", UDim2.new(0, 32, 0, 28), UDim2.new(1, -80, 0, 7), "—", topBar, Color3.fromRGB(38, 42, 56))
-    local closeBtn = createButton("CloseBtn", UDim2.new(0, 32, 0, 28), UDim2.new(1, -42, 0, 7), "✕", topBar, Color3.fromRGB(160, 40, 40))
-
-    local miniPill = Instance.new("Frame")
-    miniPill.Name = "MiniPill"
-    miniPill.Size = UDim2.new(0, 360, 0, 42)
-    miniPill.Position = UDim2.new(0.5, -180, 0, 20)
-    miniPill.BackgroundColor3 = Color3.fromRGB(20, 22, 30)
-    miniPill.Visible = false
-    addCorner(miniPill, 8)
-    addStroke(miniPill, Color3.fromRGB(60, 105, 195), 1.5)
-    miniPill.Parent = screenGui
-    makeDraggable(miniPill, miniPill)
-
-    local miniLabel = createLabel("MiniLabel", UDim2.new(1, -60, 1, 0), UDim2.new(0, 12, 0, 0), "🃏 Anime Farm | 📦 0 | 🛒 0", miniPill, Enum.TextXAlignment.Left, Color3.fromRGB(240, 240, 255), Enum.Font.GothamBold, 12)
-    local restoreBtn = createButton("RestoreBtn", UDim2.new(0, 42, 0, 28), UDim2.new(1, -48, 0, 7), "⤢", miniPill, Color3.fromRGB(45, 90, 180))
-
-    local function setMinimised(minimised)
-        SETTINGS.IsMinimised = minimised
-        mainFrame.Visible = not minimised
-        miniPill.Visible = minimised
-    end
-
-    miniBtn.MouseButton1Click:Connect(function() setMinimised(true) end)
-    restoreBtn.MouseButton1Click:Connect(function() setMinimised(false) end)
-    closeBtn.MouseButton1Click:Connect(function()
-        SETTINGS.GuiVisible = false
-        mainFrame.Visible = false
-        miniPill.Visible = false
-    end)
-
-    local tabNav = Instance.new("Frame")
-    tabNav.Size = UDim2.new(1, -20, 0, 34)
-    tabNav.Position = UDim2.new(0, 10, 0, 48)
-    tabNav.BackgroundTransparency = 1
-    tabNav.Parent = mainFrame
-
-    local contentFrame = Instance.new("Frame")
-    contentFrame.Size = UDim2.new(1, -20, 1, -125)
-    contentFrame.Position = UDim2.new(0, 10, 0, 88)
-    contentFrame.BackgroundColor3 = Color3.fromRGB(24, 26, 34)
-    addCorner(contentFrame, 8)
-    addStroke(contentFrame, Color3.fromRGB(42, 45, 58), 1)
-    contentFrame.Parent = mainFrame
-
-    local toastFrame = Instance.new("Frame")
-    toastFrame.Size = UDim2.new(1, -20, 0, 24)
-    toastFrame.Position = UDim2.new(0, 10, 1, -30)
-    toastFrame.BackgroundTransparency = 1
-    toastFrame.Parent = mainFrame
-
-    local toastLabel = createLabel("ToastLabel", UDim2.new(1, 0, 1, 0), UDim2.new(0, 0, 0, 0), "Status: Bereit", toastFrame, Enum.TextXAlignment.Center, Color3.fromRGB(120, 215, 150), Enum.Font.GothamMedium, 12)
-
-    local dashTab, sessionLbl, currLbl, spawnedLbl, boughtLbl, lastBoughtLbl, liveConveyorLbl = createDashboardTab(onScanIndex, onStopAll)
-    local convTab = createConveyorTab(onScanIndex)
-    local rankTab = createRankMachineTab()
-    local traitTab = createTraitRollerTab()
-    local towerTab = createTowerTab()
-    local baseTab = createBaseTab()
-    local setTab = createSettingsTab()
-
-    local tabs = {
-        {Key = "Dashboard", Frame = dashTab},
-        {Key = "ConveyorTab", Frame = convTab},
-        {Key = "RankTab", Frame = rankTab},
-        {Key = "TraitTab", Frame = traitTab},
-        {Key = "TowerTab", Frame = towerTab},
-        {Key = "BaseTab", Frame = baseTab},
-        {Key = "SettingsTab", Frame = setTab}
-    }
-
-    local tabButtons = {}
-    local numTabs = #tabs
-    for i, t in ipairs(tabs) do
-        t.Frame.Visible = (i == 1)
-        t.Frame.Parent = contentFrame
-
-        local btnW = 1 / numTabs
-        local btn = createButton(t.Key .. "Btn", UDim2.new(btnW, -3, 1, 0), UDim2.new((i - 1) * btnW, 1, 0, 0), "", tabNav, i == 1 and Color3.fromRGB(50, 100, 195) or Color3.fromRGB(32, 34, 44))
-        registerText(btn, t.Key)
-        table.insert(tabButtons, {Btn = btn, Key = t.Key, Frame = t.Frame})
-
-        btn.MouseButton1Click:Connect(function()
-            for _, tb in ipairs(tabButtons) do
-                tb.Frame.Visible = false
-                tb.Btn.BackgroundColor3 = Color3.fromRGB(32, 34, 44)
-            end
-            t.Frame.Visible = true
-            btn.BackgroundColor3 = Color3.fromRGB(50, 100, 195)
-        end)
-    end
-
-    return {
-        ScreenGui = screenGui,
-        MainFrame = mainFrame,
-        MiniPill = miniPill,
-        SessionLabel = sessionLbl,
-        CurrencyLabel = currLbl,
-        SpawnedLabel = spawnedLbl,
-        BoughtLabel = boughtLbl,
-        LastBoughtLabel = lastBoughtLbl,
-        LiveConveyorLabel = liveConveyorLbl,
-        ToastLabel = toastLabel,
-        MiniLabel = miniLabel,
-        SetMinimised = setMinimised
-    }
-end
-
--- ------------------------------------------------------------------------------
--- 13. HINTERGRUND-ROUTINEN & AUTOMATISIERUNGS-LOOPS
--- ------------------------------------------------------------------------------
-local guiElements = nil
-
-local function showToast(message)
-    if guiElements and guiElements.ToastLabel and guiElements.ToastLabel.Parent then
-        guiElements.ToastLabel.Text = message
-    end
-end
-
-local lastSpawnTime = 0
-
-task.spawn(function()
-    while true do
-        task.wait(SETTINGS.ConveyorScanInterval or 0.5)
-
-        local now = os.clock()
-        for inst, t in pairs(recentlyPurchasedPacks) do
-            if (now - t) > 10.0 or not inst.Parent then
-                recentlyPurchasedPacks[inst] = nil
-            end
-        end
-
-        if SETTINGS.AutoSpawnEnabled then
-            if lastSpawnTime == 0 or (now - lastSpawnTime) >= (SETTINGS.SpawnInterval or 2.0) then
-                if triggerSpawnPackPedestal() then
-                    lastSpawnTime = now
-                end
-            end
-        end
-
-        local packs = scanConveyorPacks()
-        if #packs > 0 then
-            local latest = packs[1]
-            STATS.LastDetectedConveyorItem = string.format("%s %s [%s]", latest.Mutation, latest.Name, latest.Price ~= "" and latest.Price or "Conveyor")
-
-            -- Kauft NUR, wenn der Nutzer ConveyorAutoBuyEnabled aktiv eingeschaltet hat
-            if SETTINGS.ConveyorAutoBuyEnabled then
-                for _, pack in ipairs(packs) do
-                    if matchesConveyorFilter(pack) then
-                        local bought = buyConveyorPack(pack)
-                        if bought then
-                            showToast(string.format("🛒 Gekauft: %s (%s)", pack.Name, pack.Mutation))
-                            if SETTINGS.SafeMode then
-                                task.wait(0.2)
-                            end
-                        end
-                    end
-                end
-            end
-        end
-
-        if SETTINGS.SafeMode then
-            task.wait(0.2)
-        end
-    end
-end)
-
-task.spawn(function()
-    while true do
-        task.wait(1.2)
-        if SETTINGS.AutoRankRollEnabled then
-            executeRankRoll()
-            if SETTINGS.SafeMode then task.wait(0.6) end
-        end
-    end
-end)
-
-task.spawn(function()
-    while true do
-        task.wait(1.5)
-        if SETTINGS.AutoTraitRollEnabled then
-            executeTraitRoll()
-            if SETTINGS.SafeMode then task.wait(0.8) end
-        end
-    end
-end)
-
-task.spawn(function()
-    while true do
-        task.wait(3.0)
-        if SETTINGS.AutoTowerEnabled then
-            executeTowerReplay()
-            if SETTINGS.SafeMode then task.wait(1.5) end
-        end
-    end
-end)
-
-local function setupAntiAFK()
-    local VirtualUser = nil
-    pcall(function() VirtualUser = game:GetService("VirtualUser") end)
-
-    player.Idled:Connect(function()
-        if SETTINGS.AntiAFKEnabled then
-            if VirtualUser then
-                pcall(function()
-                    VirtualUser:CaptureController()
-                    VirtualUser:ClickButton2(Vector2.new())
-                end)
-            else
-                local character = player.Character
-                local hum = character and character:FindFirstChildOfClass("Humanoid")
-                if hum and hum.Health > 0 then
-                    hum:ChangeState(Enum.HumanoidStateType.Jumping)
-                end
-            end
-        end
-    end)
-end
-
-local function applyFPSBoost()
-    if not SETTINGS.FPSEnabled then return end
-    for _, obj in ipairs(workspace:GetDescendants()) do
-        if obj:IsA("ParticleEmitter") or obj:IsA("Trail") or obj:IsA("Smoke") or obj:IsA("Fire") or obj:IsA("Sparkles") then
-            obj.Enabled = false
-        end
-    end
-end
-
-local function setupKeybinds()
-    UserInputService.InputBegan:Connect(function(input, gameProcessed)
-        if gameProcessed then return end
-        if input.KeyCode == Enum.KeyCode.RightControl or input.KeyCode == Enum.KeyCode.Insert then
-            SETTINGS.GuiVisible = not SETTINGS.GuiVisible
-            if guiElements and guiElements.MainFrame then
-                if SETTINGS.IsMinimised then
-                    guiElements.MiniPill.Visible = SETTINGS.GuiVisible
-                else
-                    guiElements.MainFrame.Visible = SETTINGS.GuiVisible
-                end
-            end
-        end
-    end)
-end
-
--- ------------------------------------------------------------------------------
--- 14. INITIALISIERUNG
--- ------------------------------------------------------------------------------
-guiElements = createGUI(
-    function()
-        local pFound, mFound = scanIndexBook()
-        local lang = LANGUAGES[SETTINGS.Language] or LANGUAGES.DE
-        showToast(string.format(lang.ToastIndexScanned, #SETTINGS.AvailablePacks, #SETTINGS.AvailableMutations))
-    end,
-    function()
-        SETTINGS.AutoSpawnEnabled = false
-        SETTINGS.ConveyorAutoBuyEnabled = false
-        SETTINGS.AutoRankRollEnabled = false
-        SETTINGS.AutoTraitRollEnabled = false
-        SETTINGS.AutoTowerEnabled = false
-        showToast("🛑 Alle Automatisierungen gestoppt")
-    end
-)
-
-setupAntiAFK()
-applyFPSBoost()
-setupKeybinds()
-
-task.spawn(function()
-    task.wait(1.0)
-    scanIndexBook()
-end)
-
-task.spawn(function()
-    while true do
-        task.wait(1)
-        if guiElements then
-            local lang = LANGUAGES[SETTINGS.Language] or LANGUAGES.DE
-            local elapsed = os.time() - STATS.StartTime
-            local hrs = math.floor(elapsed / 3600)
-            local mins = math.floor((elapsed % 3600) / 60)
-            local secs = elapsed % 60
-
-            if guiElements.SessionLabel and guiElements.SessionLabel.Parent then
-                local pfx = lang.Session or "Session: "
-                guiElements.SessionLabel.Text = string.format("%s%02d:%02d:%02d", pfx, hrs, mins, secs)
-            end
-
-            if guiElements.CurrencyLabel and guiElements.CurrencyLabel.Parent then
-                local y, g = getPlayerCurrencies()
-                guiElements.CurrencyLabel.Text = string.format("Yen: %s | Gems: %s", y, g)
-            end
-
-            if guiElements.SpawnedLabel and guiElements.SpawnedLabel.Parent then
-                local pfx = lang.PacksSpawnedLabel or "Packs gespawnt: "
-                guiElements.SpawnedLabel.Text = string.format("%s%d", pfx, STATS.PacksSpawned)
-            end
-
-            if guiElements.BoughtLabel and guiElements.BoughtLabel.Parent then
-                local pfx = lang.PacksBoughtLabel or "Packs gekauft: "
-                guiElements.BoughtLabel.Text = string.format("%s%d", pfx, STATS.PacksBought)
-            end
-
-            if guiElements.LastBoughtLabel and guiElements.LastBoughtLabel.Parent then
-                local pfx = lang.LastBoughtLabel or "Zuletzt gekauft: "
-                guiElements.LastBoughtLabel.Text = string.format("%s%s (%s)", pfx, STATS.LastBoughtPack, STATS.LastBuyTime)
-            end
-
-            if guiElements.LiveConveyorLabel and guiElements.LiveConveyorLabel.Parent then
-                local pfx = lang.LiveConveyorHeader or "📡 Live Förderband-Erkennung: "
-                guiElements.LiveConveyorLabel.Text = string.format("%s\n%s", pfx, STATS.LastDetectedConveyorItem)
-            end
-
-            if guiElements.MiniLabel and guiElements.MiniLabel.Parent then
-                local fmt = lang.MiniPillFormat or "🃏 Anime Farm | 📦 %d | 🛒 %d"
-                guiElements.MiniLabel.Text = string.format(fmt, STATS.PacksSpawned, STATS.PacksBought)
-            end
-        end
-    end
-end)
-
-print("==============================================================================")
-print("  Roll Anime Card Farm — Pro v4.1 erfolgreich geladen!")
-print("  • Auto-Kauf & Auto-Spawn: STANDARDMÄSSIG AUS (Sicherer Start)")
-print("  • Schutz: Kauft NUR Packs mit Mutation (normale Packs werden ignoriert)")
-print("  • Stelle deine Wunsch-Packs im Menü ein und aktiviere den Kauf bei Bedarf!")
-print("==============================================================================")
+    local miniBtn = createButton("MiniBtn", UDim2.new(0, 32, 0,
